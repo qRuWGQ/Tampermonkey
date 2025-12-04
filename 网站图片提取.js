@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @source       https://github.com/qRuWGQ/Tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/qRuWGQ/Tampermonkey/refs/heads/main/%E7%BD%91%E7%AB%99%E5%9B%BE%E7%89%87%E6%8F%90%E5%8F%96.js
-// @version      1.0.0
+// @version      1.0.1
 // @description  提取页面图片，支持自动/手动提取、分辨率显示、大图预览、去重、单图/ZIP下载，复制源链接/中转链接。
 // @author       扫地小厮
 // @match        *://*/*
@@ -66,16 +66,38 @@
   // 增强的 Fetch Blob，支持相对路径检查
   const fetchBlob = (url, timeout = 30000) =>
     new Promise((resolve, reject) => {
+      // 验证URL格式
+      try {
+        new URL(url);
+      } catch (e) {
+        reject(new Error(`无效的URL格式: ${url}`));
+        return;
+      }
+
       // 如果是 blob: 协议，直接用 fetch，不用 GM_xmlhttpRequest
       if (url.startsWith("blob:")) {
         fetch(url)
-          .then((r) => r.blob())
-          .then((blob) => {
-            resolve({ blob, type: blob.type.split("/")[1] || "jpg" });
+          .then((r) => {
+            if (!r.ok) {
+              throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+            }
+            return r.blob();
           })
-          .catch(reject);
+          .then((blob) => {
+            if (blob.size === 0) {
+              throw new Error("图片文件为空");
+            }
+            const type = blob.type.split("/")[1] || "jpg";
+            resolve({ blob, type });
+          })
+          .catch((error) => {
+            reject(new Error(`Blob获取失败: ${error.message}`));
+          });
         return;
       }
+
+      // 限制最大文件大小 (50MB)
+      const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
       GM_xmlhttpRequest({
         method: "GET",
@@ -84,12 +106,28 @@
         timeout,
         onload: (r) => {
           if (r.status === 200) {
+            if (r.response.size > MAX_FILE_SIZE) {
+              reject(
+                new Error(`文件过大: ${r.response.size} bytes (最大限制: ${MAX_FILE_SIZE} bytes)`)
+              );
+              return;
+            }
             const type = r.responseHeaders.match(/content-type:\s*image\/(\w+)/i)?.[1] || "jpg";
             resolve({ blob: r.response, type });
-          } else reject(r.status);
+          } else if (r.status >= 400 && r.status < 500) {
+            reject(new Error(`客户端错误 ${r.status}: 请求被拒绝或资源不存在`));
+          } else if (r.status >= 500) {
+            reject(new Error(`服务器错误 ${r.status}: 服务器暂时不可用`));
+          } else {
+            reject(new Error(`网络错误 ${r.status}: ${r.statusText || "未知错误"}`));
+          }
         },
-        onerror: reject,
-        ontimeout: () => reject("timeout"),
+        onerror: (error) => {
+          reject(new Error(`网络请求失败: ${error?.details || error?.message || "连接错误"}`));
+        },
+        ontimeout: () => {
+          reject(new Error("请求超时，请检查网络连接"));
+        },
       });
     });
 
@@ -606,15 +644,34 @@
   function showPreview(src) {
     preview.style.display = "flex";
     const img = $("#ie-p-img");
-    img.src = "";
-    img.src = src;
-    $("#ie-p-inf").innerText = "Loading...";
-    img.onload = function () {
-      $("#ie-p-inf").innerText = `${this.naturalWidth} x ${this.naturalHeight} px`;
-    };
-    img.onerror = function () {
-      $("#ie-p-inf").innerText = "预览不可用 (可能是下载链接)";
-    };
+    const infoEl = $("#ie-p-inf");
+
+    try {
+      // 验证URL格式
+      new URL(src);
+
+      img.src = "";
+      img.src = src;
+      infoEl.innerText = "Loading...";
+
+      img.onload = function () {
+        infoEl.innerText = `${this.naturalWidth} x ${this.naturalHeight} px`;
+      };
+
+      img.onerror = function () {
+        console.error("预览加载失败:", src);
+        infoEl.innerText = "预览不可用 (可能是下载链接或无效图片)";
+        infoEl.style.color = "#dc3545"; // 红色表示错误
+
+        // 可选：显示一个占位符图标
+        img.src =
+          "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE2IiBmaWxsPSIjY2NjIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iMjVweCI+44CC44CC44CCPC90ZXh0Pjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2NjYyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9IjUwcHgiPvOAi+OAi+OAizwvdGV4dD48L3N2Zz4=";
+      };
+    } catch (e) {
+      console.error("无效的预览URL:", e);
+      infoEl.innerText = `预览失败: ${e.message}`;
+      infoEl.style.color = "#dc3545";
+    }
   }
 
   async function dlOne(item, idx, btn) {
@@ -622,15 +679,31 @@
     const old = btn.innerHTML;
     btn.innerHTML = "⏳";
     btn.disabled = true;
+
     try {
       const { blob, type } = await fetchBlob(item.src);
       saveAs(blob, getFileName(item.src, type === "jpeg" ? "jpg" : type, idx));
       btn.innerHTML = "✅";
+
+      // 显示成功提示
+      const statusEl = $("#ie-status-text");
+      statusEl.innerText = `下载成功: ${getFileName(
+        item.src,
+        type === "jpeg" ? "jpg" : type,
+        idx
+      )}`;
+      statusEl.style.color = "#28a745";
     } catch (e) {
-      console.error(e);
+      console.error("图片下载失败:", e);
       btn.innerHTML = "❌";
       btn.style.background = "#ffebeb";
+
+      // 显示错误信息到状态栏
+      const statusEl = $("#ie-status-text");
+      statusEl.innerText = `下载失败: ${e.message}`;
+      statusEl.style.color = "#dc3545";
     }
+
     setTimeout(() => {
       btn.innerHTML = old;
       btn.disabled = false;
@@ -640,53 +713,119 @@
 
   async function dlZip() {
     const sels = images.filter((i) => i.sel);
-    if (!sels.length) return alert("请先选择图片");
+    if (!sels.length) {
+      alert("请先选择图片");
+      return;
+    }
+
     const btn = $("#ie-dl-zip");
     const old = btn.innerText;
     btn.innerText = "准备中...";
     btn.disabled = true;
 
-    const zip = new JSZip(),
-      folder = zip.folder("images");
-    let done = 0,
-      fail = 0;
-    const limit = 5;
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder("images");
+      let done = 0;
+      let fail = 0;
+      const limit = 5;
+      const errors = [];
 
-    for (let i = 0; i < sels.length; i += limit) {
-      const chunk = sels.slice(i, i + limit);
-      await Promise.all(
-        chunk.map((item, subIdx) =>
-          fetchBlob(item.src)
-            .then(({ blob, type }) => {
-              folder.file(getFileName(item.src, type === "jpeg" ? "jpg" : type, i + subIdx), blob);
-              done++;
-            })
-            .catch(() => fail++)
-            .finally(() => (btn.innerText = `下载中 ${done + fail}/${sels.length}`))
-        )
-      );
+      for (let i = 0; i < sels.length; i += limit) {
+        const chunk = sels.slice(i, i + limit);
+        await Promise.all(
+          chunk.map((item, subIdx) =>
+            fetchBlob(item.src)
+              .then(({ blob, type }) => {
+                const fileName = getFileName(item.src, type === "jpeg" ? "jpg" : type, i + subIdx);
+                folder.file(fileName, blob);
+                done++;
+              })
+              .catch((error) => {
+                fail++;
+                errors.push({
+                  url: item.src,
+                  error: error.message,
+                });
+                console.error(`下载失败 [${item.src}]:`, error.message);
+              })
+              .finally(() => (btn.innerText = `下载中 ${done + fail}/${sels.length}`))
+          )
+        );
+      }
+
+      if (done > 0) {
+        btn.innerText = "打包中...";
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        saveAs(zipBlob, `Images_${document.title}_${Date.now()}.zip`);
+
+        // 显示完成信息
+        const statusEl = $("#ie-status-text");
+        if (fail > 0) {
+          statusEl.innerText = `下载完成: ${done} 成功, ${fail} 失败`;
+          statusEl.style.color = "#ffc107"; // 黄色表示部分成功
+
+          // 显示失败详情（可选）
+          if (errors.length > 0) {
+            console.log("下载失败的图片:", errors);
+          }
+        } else {
+          statusEl.innerText = `ZIP下载成功: ${done} 个文件`;
+          statusEl.style.color = "#28a745"; // 绿色表示成功
+        }
+      } else {
+        throw new Error("所有图片下载都失败了");
+      }
+    } catch (e) {
+      console.error("ZIP下载失败:", e);
+      const statusEl = $("#ie-status-text");
+      statusEl.innerText = `ZIP下载失败: ${e.message}`;
+      statusEl.style.color = "#dc3545";
+
+      // 显示错误对话框
+      alert(`ZIP下载失败: ${e.message}`);
+    } finally {
+      btn.innerText = old;
+      btn.disabled = false;
     }
-
-    if (done) {
-      btn.innerText = "打包中...";
-      zip
-        .generateAsync({ type: "blob" })
-        .then((c) => saveAs(c, `Images_${document.title}_${Date.now()}.zip`));
-    } else alert("下载失败");
-
-    btn.innerText = old;
-    btn.disabled = false;
   }
 
   function copyOne(item, idx) {
     const mode = $("#ie-copy-mode").value || "original";
     const link = mode === "proxy" ? getProxyUrl(item.src) : item.src;
-    navigator.clipboard.writeText(link).then(() => {
-      const tip = $("#ie-tip");
-      tip.innerText = `${mode === "proxy" ? "中转" : "源"}链接已复制`;
-      tip.style.display = "block";
-      setTimeout(() => (tip.style.display = "none"), 1000);
-    });
+
+    navigator.clipboard
+      .writeText(link)
+      .then(() => {
+        const tip = $("#ie-tip");
+        tip.innerText = `${mode === "proxy" ? "中转" : "源"}链接已复制`;
+        tip.style.display = "block";
+        setTimeout(() => (tip.style.display = "none"), 1000);
+      })
+      .catch((error) => {
+        console.error("复制链接失败:", error);
+        const statusEl = $("#ie-status-text");
+        statusEl.innerText = `复制失败: ${error.message}`;
+        statusEl.style.color = "#dc3545";
+
+        // 降级方案：使用execCommand
+        try {
+          const textArea = document.createElement("textarea");
+          textArea.value = link;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textArea);
+
+          const tip = $("#ie-tip");
+          tip.innerText = `${mode === "proxy" ? "中转" : "源"}链接已复制 (降级方案)`;
+          tip.style.display = "block";
+          setTimeout(() => (tip.style.display = "none"), 1000);
+        } catch (fallbackError) {
+          console.error("降级复制也失败:", fallbackError);
+          alert(`复制链接失败，请手动复制:\n${link}`);
+        }
+      });
   }
 
   function copyLinks() {
