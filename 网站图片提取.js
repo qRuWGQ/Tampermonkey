@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @source       https://github.com/qRuWGQ/Tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/qRuWGQ/Tampermonkey/refs/heads/main/%E7%BD%91%E7%AB%99%E5%9B%BE%E7%89%87%E6%8F%90%E5%8F%96.js
-// @version      1.0.1
+// @version      1.0.2
 // @description  提取页面图片，支持自动/手动提取、分辨率显示、大图预览、去重、单图/ZIP下载，复制源链接/中转链接。
 // @author       扫地小厮
 // @match        *://*/*
@@ -44,6 +44,12 @@
       sel: "#content",
     },
     { name: "pexels", match: /pexels\.com/, sel: "#\\- article a[download]", attr: "href" },
+    {
+      name: "微购相册",
+      match: /szwego.com\/static\/index\.html/,
+      sel: ".index-module_grid_item_tgFT- img",
+      attr: "",
+    },
   ];
 
   // --- 工具函数 ---
