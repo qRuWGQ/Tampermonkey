@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @source       https://github.com/qRuWGQ/Tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/qRuWGQ/Tampermonkey/refs/heads/main/%E7%BD%91%E7%AB%99%E5%9B%BE%E7%89%87%E6%8F%90%E5%8F%96.js
-// @version      1.0.2
+// @version      1.0.3
 // @description  提取页面图片，支持自动/手动提取、分辨率显示、大图预览、去重、单图/ZIP下载，复制源链接/中转链接。
 // @author       扫地小厮
 // @match        *://*/*
@@ -17,6 +17,9 @@
 
 (function () {
   "use strict";
+
+  // 防止在同一页面重复执行
+  if (document.getElementById("ie-overlay")) return;
 
   // --- 配置与常量 ---
   const CFG = { workerUrl: "https://imags.oror.cc", fab: true };
@@ -46,9 +49,14 @@
     { name: "pexels", match: /pexels\.com/, sel: "#\\- article a[download]", attr: "href" },
     {
       name: "微购相册",
-      match: /szwego.com\/static\/index\.html/,
+      match: /szwego\.com\/static\/index\.html/,
       sel: ".index-module_grid_item_tgFT- img",
       attr: "",
+    },
+    {
+      name: "CK",
+      match: /charleskeith\.com/,
+      sel: "div.swiper-slide > picture > img",
     },
   ];
 
@@ -113,9 +121,7 @@
         onload: (r) => {
           if (r.status === 200) {
             if (r.response.size > MAX_FILE_SIZE) {
-              reject(
-                new Error(`文件过大: ${r.response.size} bytes (最大限制: ${MAX_FILE_SIZE} bytes)`)
-              );
+              reject(new Error(`文件过大: ${r.response.size} bytes (最大限制: ${MAX_FILE_SIZE} bytes)`));
               return;
             }
             const type = r.responseHeaders.match(/content-type:\s*image\/(\w+)/i)?.[1] || "jpg";
@@ -142,11 +148,7 @@
       // 尝试从 URL 中获取文件名，如果是 blob 则用默认名
       if (url.startsWith("blob:")) return `image_${idx + 1}.${ext}`;
       let name = decodeURIComponent(url.split("/").pop().split("?")[0]);
-      return name && name.length < 50 && /^[a-zA-Z0-9_\-\.\u4e00-\u9fa5]+$/.test(name)
-        ? name.includes(".")
-          ? name
-          : `${name}.${ext}`
-        : `image_${idx + 1}.${ext}`;
+      return name && name.length < 50 && /^[a-zA-Z0-9_\-\.\u4e00-\u9fa5]+$/.test(name) ? (name.includes(".") ? name : `${name}.${ext}`) : `image_${idx + 1}.${ext}`;
     } catch {
       return `image_${idx + 1}.${ext}`;
     }
@@ -167,7 +169,7 @@
 
   // --- 样式 ---
   GM_addStyle(`
-        #ie-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:99999;display:none;justify-content:center;align-items:center;font-family:sans-serif; }
+        #ie-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:2147483645!important;display:none;justify-content:center;align-items:center;font-family:sans-serif; }
         #ie-modal { background:#fff;width:90%;max-width:1100px;height:85vh;border-radius:12px;display:flex;flex-direction:column;box-shadow:0 10px 25px rgba(0,0,0,0.5);overflow:hidden; }
         .ie-head { padding:15px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#f8f9fa;gap:10px; }
         .ie-ctrl { display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1;justify-content:flex-end; }
@@ -192,12 +194,12 @@
         .ie-act:hover { background:#e9ecef; } .ie-act:active { background:#dee2e6; }
         .ie-foot { padding:12px 20px;border-top:1px solid #eee;background:#fff;display:flex;justify-content:space-between;align-items:center; }
         .ie-status { font-size:12px; color:#666; margin-right:auto; padding-right:15px; border-right:1px solid #eee; }
-        #ie-fab { position:fixed;width:50px;height:50px;background:#007bff;border-radius:50%;color:#fff;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 15px rgba(0,0,0,0.3);cursor:grab;z-index:99998;font-size:24px;border:2px solid #fff;bottom:30px;right:30px;user-select:none;transition: transform 0.1s; }
+        #ie-fab { position:fixed;width:50px;height:50px;background:#007bff;border-radius:50%;color:#fff;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 15px rgba(0,0,0,0.3);cursor:grab;z-index:2147483644!important;font-size:24px;border:2px solid #fff;bottom:30px;right:30px;user-select:none;transition: transform 0.1s; }
         #ie-fab:active { transform: scale(0.95); cursor: grabbing; }
-        #ie-preview { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:100000;display:none;justify-content:center;align-items:center;flex-direction:column; }
+        #ie-preview { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:2147483646!important;display:none;justify-content:center;align-items:center;flex-direction:column; }
         #ie-p-img { max-width:90%;max-height:90%;object-fit:contain;box-shadow:0 0 20px rgba(255,255,255,0.2);background:#1a1a1a; }
         .ie-hover { outline:3px solid #ff4757!important;box-shadow:inset 0 0 0 1000px rgba(255,71,87,0.05)!important; }
-        #ie-tip { position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:10px 20px;border-radius:20px;z-index:100001;display:none;pointer-events:none; }
+        #ie-tip { position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:10px 20px;border-radius:20px;z-index:2147483647!important;display:none;pointer-events:none; }
     `);
 
   // --- UI 构建 ---
@@ -235,7 +237,7 @@
               },
             },
             ...PRESETS.map((p, i) => el("option", { value: i, text: p.name })),
-            el("option", { value: "-1", text: "自定义" })
+            el("option", { value: "-1", text: "自定义" }),
           ),
           el("input", {
             type: "text",
@@ -263,8 +265,8 @@
             className: "ie-btn b-red",
             text: "关闭",
             onclick: () => (app.style.display = "none"),
-          })
-        )
+          }),
+        ),
       ),
       el("div", { className: "ie-body" }, el("div", { id: "ie-grid", className: "ie-grid" })),
       el(
@@ -298,7 +300,7 @@
             id: "ie-dedup",
             text: "🧹 去重",
             onclick: deduplicate,
-          })
+          }),
         ),
         el(
           "div",
@@ -311,7 +313,7 @@
               style: { padding: "6px 8px", minWidth: "70px", fontSize: "13px" },
             },
             el("option", { value: "original", selected: true, text: "源链接" }),
-            el("option", { value: "proxy", text: "中转" })
+            el("option", { value: "proxy", text: "中转" }),
           ),
           el("button", { className: "ie-btn b-blue", text: "📋 复制链接", onclick: copyLinks }),
           el("button", {
@@ -319,10 +321,10 @@
             id: "ie-dl-zip",
             text: "📦 下载压缩包",
             onclick: dlZip,
-          })
-        )
-      )
-    )
+          }),
+        ),
+      ),
+    ),
   );
 
   const preview = el(
@@ -344,14 +346,21 @@
         padding: "4px 10px",
         borderRadius: "4px",
       },
-    })
+    }),
   );
   const tip = el("div", {
     id: "ie-tip",
     html: "移动选择 / <b>W</b> 扩大选中 / <b>S</b> 缩小选中 / <b>点击</b> 确认 / <b>ESC</b> 退出",
   });
 
-  document.body.append(app, preview, tip);
+  // 确保 body 存在后再添加 UI
+  if (document.body) {
+    if (!document.getElementById("ie-overlay")) document.body.append(app, preview, tip);
+  } else {
+    document.addEventListener("DOMContentLoaded", () => {
+      if (!document.getElementById("ie-overlay")) document.body.append(app, preview, tip);
+    });
+  }
 
   const imgObserver = new IntersectionObserver(
     (entries) => {
@@ -367,7 +376,7 @@
         }
       });
     },
-    { root: null, threshold: 0, rootMargin: "0px 0px 200px 0px" }
+    { root: null, threshold: 0, rootMargin: "0px 0px 200px 0px" },
   );
 
   // --- 核心逻辑 ---
@@ -375,7 +384,9 @@
     isPicking = false,
     curHigh = null;
 
-  if (CFG.fab) {
+  // 悬浮图标仅在顶层窗口显示，且防止重复创建
+  if (CFG.fab && window.self === window.top) {
+    if (document.getElementById("ie-fab")) return;
     const pos = JSON.parse(localStorage.getItem("ie_pos") || '{"bottom":"30px","right":"30px"}');
     const fab = el("div", { id: "ie-fab", html: "📷", title: "提取图片", style: pos });
     let isDrag = false,
@@ -400,15 +411,17 @@
       }
     });
     document.addEventListener("mouseup", () => {
-      if (isPressed && isDrag)
-        localStorage.setItem(
-          "ie_pos",
-          JSON.stringify({ left: fab.style.left, top: fab.style.top })
-        );
+      if (isPressed && isDrag) localStorage.setItem("ie_pos", JSON.stringify({ left: fab.style.left, top: fab.style.top }));
       isPressed = false;
     });
     fab.onclick = () => !isDrag && openMain();
-    document.body.appendChild(fab);
+    if (document.body) {
+      if (!document.getElementById("ie-fab")) document.body.appendChild(fab);
+    } else {
+      document.addEventListener("DOMContentLoaded", () => {
+        if (!document.getElementById("ie-fab")) document.body.appendChild(fab);
+      });
+    }
   }
 
   function openMain() {
@@ -464,14 +477,7 @@
         else {
           if (el.tagName === "A") src = el.href;
           else if (el.tagName === "IMG") {
-            const candidates = [
-              "data-src-high",
-              "data-original",
-              "data-lazy-src",
-              "data-src",
-              "data-url",
-              "src",
-            ];
+            const candidates = ["data-src-high", "data-original", "data-lazy-src", "data-src", "data-url", "src"];
             for (let attr of candidates) {
               const val = el.getAttribute(attr) || el[attr];
               if (val && !val.includes("placeholder")) {
@@ -518,8 +524,7 @@
     const grid = $("#ie-grid");
     grid.innerHTML = "";
     if (!images.length)
-      return (grid.innerHTML =
-        '<div style="text-align:center;padding:40px;color:#999;grid-column:1/-1">⚠️ 未找到有效图片链接<br><small>请检查选择器是否正确，或尝试指定属性 (如 href)</small></div>');
+      return (grid.innerHTML = '<div style="text-align:center;padding:40px;color:#999;grid-column:1/-1">⚠️ 未找到有效图片链接<br><small>请检查选择器是否正确，或尝试指定属性 (如 href)</small></div>');
 
     const frag = document.createDocumentFragment();
     images.forEach((item, idx) => {
@@ -538,9 +543,7 @@
           console.error("Thumb onerror:", this.src);
           this.style.display = "none";
           // 如果缩略图加载失败（可能是非图片链接），显示一个文件图标
-          this.parentElement.appendChild(
-            el("div", { style: { fontSize: "30px", color: "#666" }, text: "📄" })
-          );
+          this.parentElement.appendChild(el("div", { style: { fontSize: "30px", color: "#666" }, text: "📄" }));
         },
       });
 
@@ -568,7 +571,7 @@
               item.sel = e.target.checked;
               e.stopPropagation();
             },
-          })
+          }),
         ),
         el("div", {
           className: "ie-meta",
@@ -605,8 +608,8 @@
               e.stopPropagation();
               copyOne(item, idx);
             },
-          })
-        )
+          }),
+        ),
       );
       frag.appendChild(card);
     });
@@ -693,11 +696,7 @@
 
       // 显示成功提示
       const statusEl = $("#ie-status-text");
-      statusEl.innerText = `下载成功: ${getFileName(
-        item.src,
-        type === "jpeg" ? "jpg" : type,
-        idx
-      )}`;
+      statusEl.innerText = `下载成功: ${getFileName(item.src, type === "jpeg" ? "jpg" : type, idx)}`;
       statusEl.style.color = "#28a745";
     } catch (e) {
       console.error("图片下载失败:", e);
@@ -755,8 +754,8 @@
                 });
                 console.error(`下载失败 [${item.src}]:`, error.message);
               })
-              .finally(() => (btn.innerText = `下载中 ${done + fail}/${sels.length}`))
-          )
+              .finally(() => (btn.innerText = `下载中 ${done + fail}/${sels.length}`)),
+          ),
         );
       }
 
@@ -836,13 +835,8 @@
 
   function copyLinks() {
     const mode = $("#ie-copy-mode").value || "original";
-    const links = images
-      .filter((i) => i.sel)
-      .map((i) => (mode === "proxy" ? getProxyUrl(i.src) : i.src));
-    if (links.length)
-      navigator.clipboard
-        .writeText(links.join("\n"))
-        .then(() => alert(`已复制 ${links.length} 条链接`));
+    const links = images.filter((i) => i.sel).map((i) => (mode === "proxy" ? getProxyUrl(i.src) : i.src));
+    if (links.length) navigator.clipboard.writeText(links.join("\n")).then(() => alert(`已复制 ${links.length} 条链接`));
   }
 
   // --- 选取器逻辑 ---
@@ -913,8 +907,7 @@
 
   GM_registerMenuCommand("📥 提取图片", openMain);
   document.addEventListener("keydown", (e) => {
-    if (e.altKey && e.key.toLowerCase() === "i")
-      app.style.display === "flex" ? (app.style.display = "none") : openMain();
+    if (e.altKey && e.key.toLowerCase() === "i") app.style.display === "flex" ? (app.style.display = "none") : openMain();
     if (e.key === "Escape") preview.style.display = "none";
   });
 })();
