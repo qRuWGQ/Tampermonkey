@@ -77,6 +77,49 @@
     return e;
   };
 
+  /**
+   * 剥离CDN图片处理参数，还原原图URL
+   * 支持：七牛(imageMogr2/imageView2)、阿里云OSS(x-oss-process)、又拍云(!/)、腾讯云(imageMogr2)
+   */
+  const cleanImageUrl = (url) => {
+    if (!url || url.startsWith("blob:") || url.startsWith("data:")) return url;
+    try {
+      const u = new URL(url);
+
+      // 七牛云 / 腾讯云万象：?imageMogr2/... 或 ?imageView2/...
+      // 这类URL的 search 部分以 ? 开头后直接是处理指令（无 key=value 结构）
+      if (/\?(imageMogr2|imageView2|watermark)\//i.test(url)) {
+        return u.origin + u.pathname;
+      }
+
+      // 阿里云OSS：?x-oss-process=image/resize,...
+      if (u.searchParams.has("x-oss-process")) {
+        u.searchParams.delete("x-oss-process");
+        return u.toString();
+      }
+
+      // 又拍云：!/format/webp/quality/80 等路径式参数
+      // 通常追加在路径末尾，如 /xxx.jpg!/thumbnail/320x320
+      const bangIdx = u.pathname.indexOf("!/");
+      if (bangIdx !== -1) {
+        u.pathname = u.pathname.slice(0, bangIdx);
+        return u.toString();
+      }
+
+      // 通用：URL含常见缩略参数（thumbnail, resize, width, w, h, quality, format, crop）
+      // 且路径末段是图片扩展名时，尝试去除所有查询参数
+      const hasImageExt = /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(u.pathname);
+      const hasThumbnailParams = /(thumbnail|resize|width|quality|format|imageSlim|imageslim)/i.test(u.search);
+      if (hasImageExt && hasThumbnailParams) {
+        return u.origin + u.pathname;
+      }
+
+      return url;
+    } catch {
+      return url;
+    }
+  };
+
   // 增强的 Fetch Blob，支持相对路径检查
   const fetchBlob = (url, timeout = 30000) =>
     new Promise((resolve, reject) => {
@@ -144,14 +187,9 @@
     });
 
   const getFileName = (url, ext, idx) => {
-    try {
-      // 尝试从 URL 中获取文件名，如果是 blob 则用默认名
-      if (url.startsWith("blob:")) return `image_${idx + 1}.${ext}`;
-      let name = decodeURIComponent(url.split("/").pop().split("?")[0]);
-      return name && name.length < 50 && /^[a-zA-Z0-9_\-\.\u4e00-\u9fa5]+$/.test(name) ? (name.includes(".") ? name : `${name}.${ext}`) : `image_${idx + 1}.${ext}`;
-    } catch {
-      return `image_${idx + 1}.${ext}`;
-    }
+    // 统一序号命名：image01, image02, ...
+    const num = String(idx + 1).padStart(2, "0");
+    return `image${num}.${ext}`;
   };
 
   const getExtFromUrl = (url) => {
@@ -494,12 +532,13 @@
 
         // 3. 路径补全与校验
         if (src) {
-          // 如果是相对路径，且不是 blob/data 开头，尝试补全
           if (!src.startsWith("http") && !src.startsWith("blob:") && !src.startsWith("data:")) {
             src = new URL(src, location.origin).href;
           }
 
-          // 放宽校验，支持 blob 和 data 协议
+          // ★ 新增：剥离CDN图片处理参数，还原原图URL
+          src = cleanImageUrl(src);
+
           const isHttp = src.startsWith("http");
           const isBlob = src.startsWith("blob:");
           const isData = src.startsWith("data:image");
@@ -716,7 +755,7 @@
     }, 2000);
   }
 
-  async function dlZip() {
+async function dlZip() {
     const sels = images.filter((i) => i.sel);
     if (!sels.length) {
       alert("请先选择图片");
@@ -735,27 +774,48 @@
       let fail = 0;
       const limit = 5;
       const errors = [];
+      const usedNames = new Set(); // ★ 文件名注册表，防止 JSZip 静默覆写
+
+      // ★ 辅助函数：确保 ZIP 内文件名唯一
+      const resolveUniqueName = (fileName) => {
+        if (!usedNames.has(fileName)) {
+          usedNames.add(fileName);
+          return fileName;
+        }
+        // 极端兜底：序号+时间戳
+        const lastDot = fileName.lastIndexOf(".");
+        const base = lastDot !== -1 ? fileName.slice(0, lastDot) : fileName;
+        const extension = lastDot !== -1 ? fileName.slice(lastDot) : ".jpg";
+        let i = 1;
+        let candidate;
+        do {
+          candidate = `${base}_${i}${extension}`;
+          i++;
+        } while (usedNames.has(candidate));
+        usedNames.add(candidate);
+        return candidate;
+      };
 
       for (let i = 0; i < sels.length; i += limit) {
         const chunk = sels.slice(i, i + limit);
         await Promise.all(
-          chunk.map((item, subIdx) =>
-            fetchBlob(item.src)
+          chunk.map((item, subIdx) => {
+            const globalIdx = i + subIdx; // ★ 捕获全局索引（避免闭包变量污染）
+            return fetchBlob(item.src)
               .then(({ blob, type }) => {
-                const fileName = getFileName(item.src, type === "jpeg" ? "jpg" : type, i + subIdx);
+                const ext = type === "jpeg" ? "jpg" : type;
+                const rawName = getFileName(item.src, ext, globalIdx);
+                const fileName = resolveUniqueName(rawName, globalIdx, ext); // ★ 唯一化
                 folder.file(fileName, blob);
                 done++;
               })
               .catch((error) => {
                 fail++;
-                errors.push({
-                  url: item.src,
-                  error: error.message,
-                });
+                errors.push({ url: item.src, error: error.message });
                 console.error(`下载失败 [${item.src}]:`, error.message);
               })
-              .finally(() => (btn.innerText = `下载中 ${done + fail}/${sels.length}`)),
-          ),
+              .finally(() => (btn.innerText = `下载中 ${done + fail}/${sels.length}`));
+          }),
         );
       }
 
@@ -764,19 +824,14 @@
         const zipBlob = await zip.generateAsync({ type: "blob" });
         saveAs(zipBlob, `Images_${document.title}_${Date.now()}.zip`);
 
-        // 显示完成信息
         const statusEl = $("#ie-status-text");
         if (fail > 0) {
           statusEl.innerText = `下载完成: ${done} 成功, ${fail} 失败`;
-          statusEl.style.color = "#ffc107"; // 黄色表示部分成功
-
-          // 显示失败详情（可选）
-          if (errors.length > 0) {
-            console.log("下载失败的图片:", errors);
-          }
+          statusEl.style.color = "#ffc107";
+          if (errors.length > 0) console.log("下载失败的图片:", errors);
         } else {
           statusEl.innerText = `ZIP下载成功: ${done} 个文件`;
-          statusEl.style.color = "#28a745"; // 绿色表示成功
+          statusEl.style.color = "#28a745";
         }
       } else {
         throw new Error("所有图片下载都失败了");
@@ -786,8 +841,6 @@
       const statusEl = $("#ie-status-text");
       statusEl.innerText = `ZIP下载失败: ${e.message}`;
       statusEl.style.color = "#dc3545";
-
-      // 显示错误对话框
       alert(`ZIP下载失败: ${e.message}`);
     } finally {
       btn.innerText = old;
