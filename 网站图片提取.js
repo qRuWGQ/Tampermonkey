@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @source       https://github.com/qRuWGQ/Tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/qRuWGQ/Tampermonkey/refs/heads/main/%E7%BD%91%E7%AB%99%E5%9B%BE%E7%89%87%E6%8F%90%E5%8F%96.js
-// @version      1.0.3
+// @version      1.0.4
 // @description  提取页面图片，支持自动/手动提取、分辨率显示、大图预览、去重、单图/ZIP下载，复制源链接/中转链接。
 // @author       扫地小厮
 // @match        *://*/*
@@ -58,6 +58,11 @@
       match: /charleskeith\.com/,
       sel: "div.swiper-slide > picture > img",
     },
+    {
+      name: "nike",
+      match: /nike\.com/,
+      sel: ".css-6loeq5 img",
+    }
   ];
 
   // --- 工具函数 ---
