@@ -65,7 +65,7 @@
       },
       {
         name: "得物",
-        match: /cdn\.poizon\.com/,
+        match: /dewu\.com/,
         sel: "div.image-small img",
       },
       {
